@@ -1,0 +1,24 @@
+# Configuration kafkactl du labo.  export KAFKACTL_CONFIG="$PWD/kafkactl/config.yml"
+#
+# Deux contextes, comme deux personnes au travail :
+#   lab-admin : l'equipe Kafka (groupe GitLab kafka-lab/kafka-admins) -> cree les namespaces
+#   lab       : TOI, membre du groupe GitLab kafka-lab/simulation     -> gere topics, schemas, connecteurs
+#
+# En prod : api = URL Ns4Kafka de l'entreprise, user-token = ton token GitLab, namespace = le tien.
+# "kafkactl config use-context <nom>" recopie le contexte choisi dans les 3 cles du bas
+# (ce fichier est donc modifie par kafkactl : c'est normal).
+kafkactl:
+  contexts:
+    - name: "lab-admin"
+      context:
+        api: "http://localhost:8080"
+        user-token: "kafka-admin-token"
+        namespace: "lab"
+    - name: "lab"
+      context:
+        api: "http://localhost:8080"
+        user-token: "simulation-dev-token"
+        namespace: "lab"
+  api: "http://localhost:8080"
+  user-token: "simulation-dev-token"
+  current-namespace: "lab"

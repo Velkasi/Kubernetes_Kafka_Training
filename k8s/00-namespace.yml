@@ -1,0 +1,20 @@
+# Namespace Kubernetes du labo + mots de passe Postgres.
+# A ne pas confondre avec le namespace Ns4Kafka "lab" (kafkactl/admin/namespace-lab.yml).
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: kafka-lab
+  labels:
+    app.kubernetes.io/part-of: kafka-lab
+---
+# Un Secret est seulement encode en base64, pas chiffre.
+# "stringData" evite d'encoder a la main : Kubernetes le stocke en base64 dans "data".
+apiVersion: v1
+kind: Secret
+metadata:
+  name: pg-credentials
+  namespace: kafka-lab
+type: Opaque
+stringData:
+  POSTGRES_USER: lab
+  POSTGRES_PASSWORD: lab-password

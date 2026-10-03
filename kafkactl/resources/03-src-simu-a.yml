@@ -1,0 +1,55 @@
+# Source JDBC : base A -> topic lab.simulation.measures, au format normalise.
+apiVersion: v1
+kind: Connector
+metadata:
+  name: lab.src-simu-a
+spec:
+  connectCluster: connect-lab
+  config:
+    connector.class: io.confluent.connect.jdbc.JdbcSourceConnector
+    tasks.max: '1'
+    connection.url: jdbc:postgresql://simu-a:5432/simu
+    connection.user: lab
+    connection.password: lab-password      # prod : kafkactl connect-cluster vault -> ${aes256:...}
+
+    # Lecture incrementale : lignes dont updated_at a avance, ou (a updated_at egal) measure_id plus grand.
+    mode: timestamp+incrementing
+    timestamp.column.name: updated_at
+    incrementing.column.name: measure_id
+    # Les colonnes castees sont vues comme "nullable" : on desactive le controle NOT NULL du connecteur.
+    validate.non.null: 'false'
+    db.timezone: UTC
+    poll.interval.ms: '5000'
+
+    # En mode "query", topic.prefix est le nom COMPLET du topic.
+    topic.prefix: lab.simulation.measures
+    # Requete enveloppee dans SELECT * FROM (...) t : le connecteur ajoute son propre WHERE sur t.
+    # Chaque colonne est castee : noms ET types communs a toutes les sources (voir etape 12).
+    query: >-
+      SELECT * FROM (
+        SELECT CAST('SIMU_A'   AS VARCHAR(20))      AS source_id,
+               CAST(measure_id AS BIGINT)           AS measure_id,
+               CAST(machine    AS VARCHAR(50))      AS equipment,
+               CAST(capteur    AS VARCHAR(50))      AS sensor,
+               CAST(valeur     AS DOUBLE PRECISION) AS value,
+               CAST(unite      AS VARCHAR(20))      AS unit,
+               CAST(mesure_le  AS TIMESTAMP)        AS measured_at,
+               CAST(updated_at AS TIMESTAMP)        AS updated_at
+        FROM mesures
+      ) t
+
+    key.converter: org.apache.kafka.connect.storage.StringConverter
+    value.converter: io.confluent.connect.avro.AvroConverter
+    value.converter.schema.registry.url: http://schema-registry:8081
+    # Etape 11 : passer a 'false' / 'true' pour figer le contrat Avro.
+    value.converter.auto.register.schemas: 'true'
+    value.converter.use.latest.version: 'false'
+
+    # SMT : cle du message = source_id (ordre garanti par source), nom stable du record Avro.
+    transforms: createKey,extractKey,setName
+    transforms.createKey.type: org.apache.kafka.connect.transforms.ValueToKey
+    transforms.createKey.fields: source_id
+    transforms.extractKey.type: org.apache.kafka.connect.transforms.ExtractField$Key
+    transforms.extractKey.field: source_id
+    transforms.setName.type: org.apache.kafka.connect.transforms.SetSchemaMetadata$Value
+    transforms.setName.schema.name: com.lab.simulation.SimulationMeasure

@@ -1,0 +1,154 @@
+# Ressources ADMIN : en prod, l'equipe Kafka les a deja creees pour toi.
+# A appliquer avec le contexte admin :  kafkactl config use-context lab-admin
+#
+# Elles relient trois choses :
+#   groupe GitLab  kafka-lab/simulation   --RoleBinding-->   namespace Ns4Kafka "lab"
+#   namespace "lab"  --ACL OWNER-->  tout ce qui commence par "lab."
+#   namespace "lab"  --connectClusters-->  cluster Kafka Connect "connect-lab"
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: lab
+  cluster: local                  # cluster Kafka declare dans la config Ns4Kafka (managed-clusters)
+  labels:
+    contacts: "toi@example.com"
+spec:
+  kafkaUser: lab-user             # utilisateur Kafka du namespace (non gere dans le labo : broker sans SASL)
+  connectClusters:
+    - connect-lab                 # cluster Connect que ce namespace a le droit d'utiliser
+  topicValidator:
+    validationConstraints:
+      partitions:
+        validation-type: Range
+        min: 1
+        max: 6
+      replication.factor:         # 1 broker dans le labo ; en prod c'est en general 3
+        validation-type: Range
+        min: 1
+        max: 1
+      min.insync.replicas:
+        validation-type: Range
+        min: 1
+        max: 1
+      retention.ms:
+        optional: true
+        validation-type: Range
+        min: 60000                # 1 minute
+        max: 604800000            # 7 jours
+      cleanup.policy:
+        validation-type: ValidList
+        validStrings:
+          - delete
+          - compact
+  connectValidator:
+    validationConstraints:
+      key.converter:              # oblige chaque connecteur a declarer ses convertisseurs
+        validation-type: NonEmptyString
+      value.converter:
+        validation-type: NonEmptyString
+      connector.class:            # seules ces classes sont autorisees dans ce namespace
+        validation-type: ValidString
+        validStrings:
+          - io.confluent.connect.jdbc.JdbcSourceConnector
+          - io.confluent.connect.jdbc.JdbcSinkConnector
+---
+# QUI a le droit d'agir sur le namespace "lab" : les membres du groupe GitLab kafka-lab/simulation.
+apiVersion: v1
+kind: RoleBinding
+metadata:
+  name: lab-rb-simulation
+  namespace: lab
+spec:
+  role:
+    resourceTypes:
+      - schemas
+      - schemas/config
+      - topics
+      - topics/import
+      - topics/delete-records
+      - connectors
+      - connectors/import
+      - connectors/change-state
+      - connectors/offsets
+      - connect-clusters
+      - connect-clusters/vaults
+      - acls
+      - consumer-groups
+      - consumer-groups/reset
+      - streams
+    verbs:
+      - GET
+      - POST
+      - PUT
+      - DELETE
+  subject:
+    subjectType: GROUP
+    subjectName: kafka-lab/simulation   # chemin complet du groupe GitLab
+---
+apiVersion: v1
+kind: RoleBinding
+metadata:
+  name: lab-rb-simulation-readonly
+  namespace: lab
+spec:
+  role:
+    resourceTypes:
+      - quota
+    verbs:
+      - GET
+  subject:
+    subjectType: GROUP
+    subjectName: kafka-lab/simulation
+---
+# CE QUE le namespace possede : prefixe "lab." pour les topics (et donc les subjects de schemas)...
+apiVersion: v1
+kind: AccessControlEntry
+metadata:
+  name: lab-acl-topic
+  namespace: lab
+spec:
+  resourceType: TOPIC
+  resource: lab.
+  resourcePatternType: PREFIXED
+  permission: OWNER
+  grantedTo: lab
+---
+# ... les consumer groups de tes applications ...
+apiVersion: v1
+kind: AccessControlEntry
+metadata:
+  name: lab-acl-group
+  namespace: lab
+spec:
+  resourceType: GROUP
+  resource: lab.
+  resourcePatternType: PREFIXED
+  permission: OWNER
+  grantedTo: lab
+---
+# ... les consumer groups des sinks : Kafka Connect les nomme "connect-<nom du connecteur>" ...
+apiVersion: v1
+kind: AccessControlEntry
+metadata:
+  name: lab-acl-connect-group
+  namespace: lab
+spec:
+  resourceType: GROUP
+  resource: connect-lab.
+  resourcePatternType: PREFIXED
+  permission: OWNER
+  grantedTo: lab
+---
+# ... et les connecteurs.
+apiVersion: v1
+kind: AccessControlEntry
+metadata:
+  name: lab-acl-connect
+  namespace: lab
+spec:
+  resourceType: CONNECT
+  resource: lab.
+  resourcePatternType: PREFIXED
+  permission: OWNER
+  grantedTo: lab

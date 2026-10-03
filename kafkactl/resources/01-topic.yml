@@ -1,0 +1,13 @@
+# Topic normalise : toutes les sources y ecrivent le meme format Avro.
+# ATTENTION : le nombre de partitions ne peut plus etre change ensuite. Choisis-le bien en prod.
+apiVersion: v1
+kind: Topic
+metadata:
+  name: lab.simulation.measures
+spec:
+  replicationFactor: 1            # prod : en general 3 (le validateur de ton namespace te le dira)
+  partitions: 3
+  configs:
+    min.insync.replicas: '1'
+    cleanup.policy: delete
+    retention.ms: '604800000'     # 7 jours : c'est aussi la profondeur de rejeu possible

@@ -1,0 +1,49 @@
+# Source JDBC : base B (structure differente) -> MEME topic, MEME schema Avro que la base A.
+apiVersion: v1
+kind: Connector
+metadata:
+  name: lab.src-simu-b
+spec:
+  connectCluster: connect-lab
+  config:
+    connector.class: io.confluent.connect.jdbc.JdbcSourceConnector
+    tasks.max: '1'
+    connection.url: jdbc:postgresql://simu-b:5432/simu
+    connection.user: lab
+    connection.password: lab-password
+
+    mode: timestamp+incrementing
+    timestamp.column.name: updated_at      # nom APRES normalisation (colonne d'origine : last_update)
+    incrementing.column.name: measure_id   # nom APRES normalisation (colonne d'origine : result_id)
+    validate.non.null: 'false'
+    db.timezone: UTC
+    poll.interval.ms: '5000'
+
+    topic.prefix: lab.simulation.measures
+    query: >-
+      SELECT * FROM (
+        SELECT CAST('SIMU_B'              AS VARCHAR(20))      AS source_id,
+               CAST(result_id             AS BIGINT)           AS measure_id,
+               CAST('EQ-' || equipment_code AS VARCHAR(50))    AS equipment,
+               CAST(sensor_name           AS VARCHAR(50))      AS sensor,
+               CAST(measured_value        AS DOUBLE PRECISION) AS value,
+               CAST(unit                  AS VARCHAR(20))      AS unit,
+               CAST(measured_at           AS TIMESTAMP)        AS measured_at,
+               CAST(last_update           AS TIMESTAMP)        AS updated_at
+        FROM sim_results
+      ) t
+
+    key.converter: org.apache.kafka.connect.storage.StringConverter
+    value.converter: io.confluent.connect.avro.AvroConverter
+    value.converter.schema.registry.url: http://schema-registry:8081
+    # Etape 11 : passer a 'false' / 'true' AVANT d'appliquer ce connecteur.
+    value.converter.auto.register.schemas: 'true'
+    value.converter.use.latest.version: 'false'
+
+    transforms: createKey,extractKey,setName
+    transforms.createKey.type: org.apache.kafka.connect.transforms.ValueToKey
+    transforms.createKey.fields: source_id
+    transforms.extractKey.type: org.apache.kafka.connect.transforms.ExtractField$Key
+    transforms.extractKey.field: source_id
+    transforms.setName.type: org.apache.kafka.connect.transforms.SetSchemaMetadata$Value
+    transforms.setName.schema.name: com.lab.simulation.SimulationMeasure

@@ -1,0 +1,90 @@
+# Cluster Kafka Connect "connect-lab" : 2 pods avec le meme group.id = UN seul cluster.
+# Tout l'etat (configs, offsets, statuts) est stocke dans 3 topics Kafka internes lab-connect-*.
+# Image construite dans Minikube : minikube image build -t connect-lab:1.0 docker/connect
+apiVersion: v1
+kind: Service
+metadata:
+  name: connect
+  namespace: kafka-lab
+spec:
+  selector:
+    app: connect
+  ports:
+    - name: rest
+      port: 8083
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: connect
+  namespace: kafka-lab
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: connect
+  template:
+    metadata:
+      labels:
+        app: connect
+    spec:
+      # Indispensable : l'image transforme toute variable CONNECT_* en propriete du worker.
+      # Le Service "connect" injecterait CONNECT_PORT=tcp://... sans cette ligne.
+      enableServiceLinks: false
+      containers:
+        - name: connect
+          image: connect-lab:1.0
+          imagePullPolicy: Never     # image locale a Minikube, jamais telechargee
+          ports:
+            - containerPort: 8083
+          env:
+            - name: CONNECT_BOOTSTRAP_SERVERS
+              value: "kafka:9092"
+            - name: CONNECT_GROUP_ID
+              value: "connect-lab"
+            - name: CONNECT_CONFIG_STORAGE_TOPIC
+              value: "lab-connect-configs"
+            - name: CONNECT_OFFSET_STORAGE_TOPIC
+              value: "lab-connect-offsets"
+            - name: CONNECT_STATUS_STORAGE_TOPIC
+              value: "lab-connect-status"
+            - name: CONNECT_CONFIG_STORAGE_REPLICATION_FACTOR
+              value: "1"
+            - name: CONNECT_OFFSET_STORAGE_REPLICATION_FACTOR
+              value: "1"
+            - name: CONNECT_STATUS_STORAGE_REPLICATION_FACTOR
+              value: "1"
+            # Chaque worker annonce SON adresse aux autres (redirection des appels REST).
+            - name: CONNECT_REST_ADVERTISED_HOST_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: status.podIP
+            - name: CONNECT_REST_PORT
+              value: "8083"
+            - name: CONNECT_KEY_CONVERTER
+              value: "org.apache.kafka.connect.storage.StringConverter"
+            - name: CONNECT_VALUE_CONVERTER
+              value: "io.confluent.connect.avro.AvroConverter"
+            - name: CONNECT_VALUE_CONVERTER_SCHEMA_REGISTRY_URL
+              value: "http://schema-registry:8081"
+            # Autorise producer.override.* / consumer.override.* dans les connecteurs (utile en prod SASL).
+            - name: CONNECT_CONNECTOR_CLIENT_CONFIG_OVERRIDE_POLICY
+              value: "All"
+            - name: CONNECT_PLUGIN_PATH
+              value: "/usr/share/java,/usr/share/confluent-hub-components"
+            - name: CONNECT_LOG4J_LOGGERS
+              value: "org.reflections=ERROR"
+            - name: KAFKA_HEAP_OPTS
+              value: "-Xms256m -Xmx640m"
+          readinessProbe:
+            httpGet:
+              path: /connectors
+              port: 8083
+            initialDelaySeconds: 30
+            periodSeconds: 5
+          resources:
+            requests:
+              cpu: 250m
+              memory: 768Mi
+            limits:
+              memory: 1Gi

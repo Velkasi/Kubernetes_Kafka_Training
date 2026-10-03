@@ -1,0 +1,7 @@
+# Fins de ligne LF partout, y compris sous Windows : un script bash ou un ConfigMap
+# contenant des CRLF (\r) casse de facon incomprehensible dans Git Bash, WSL ou un pod.
+* text=auto eol=lf
+*.sh text eol=lf
+*.yml text eol=lf
+*.md text eol=lf
+*.avsc text eol=lf

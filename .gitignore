@@ -1,0 +1,4 @@
+# Config kafkactl personnelle (peut contenir ton vrai token GitLab : ne jamais la committer)
+kafkactl/config.local.yml
+# Fichiers de test temporaires
+*.tmp

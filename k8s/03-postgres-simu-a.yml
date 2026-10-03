@@ -1,0 +1,91 @@
+# Base de simulation A. Compare sa table avec celle de la base B (04-postgres-simu-b.yml) :
+# noms de colonnes et types differents, c'est ce que la normalisation devra absorber.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: simu-a-init
+  namespace: kafka-lab
+data:
+  01-schema.sql: |
+    CREATE TABLE mesures (
+      measure_id  SERIAL        PRIMARY KEY,           -- identifiant croissant
+      machine     VARCHAR(30)   NOT NULL,              -- ex : 'EQ-101'
+      capteur     VARCHAR(30)   NOT NULL,
+      valeur      NUMERIC(10,3) NOT NULL,
+      unite       VARCHAR(10)   NOT NULL,
+      mesure_le   TIMESTAMP     NOT NULL,
+      updated_at  TIMESTAMP     NOT NULL DEFAULT now() -- date de mise a jour fiable
+    );
+    CREATE INDEX mesures_updated_at ON mesures (updated_at, measure_id);
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: simu-a
+  namespace: kafka-lab
+spec:
+  selector:
+    app: simu-a
+  ports:
+    - name: postgres
+      port: 5432
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: simu-a
+  namespace: kafka-lab
+spec:
+  serviceName: simu-a
+  replicas: 1
+  selector:
+    matchLabels:
+      app: simu-a
+  template:
+    metadata:
+      labels:
+        app: simu-a
+    spec:
+      containers:
+        - name: postgres
+          image: postgres:16-alpine
+          ports:
+            - containerPort: 5432
+          envFrom:
+            - secretRef:
+                name: pg-credentials
+          env:
+            - name: POSTGRES_DB
+              value: simu
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata
+            - name: TZ
+              value: UTC
+          readinessProbe:
+            exec:
+              command: ["pg_isready", "-U", "lab", "-d", "simu"]
+            periodSeconds: 5
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              memory: 256Mi
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/postgresql/data
+            # Execute UNIQUEMENT au premier demarrage (volume vide).
+            - name: init
+              mountPath: /docker-entrypoint-initdb.d
+      volumes:
+        - name: init
+          configMap:
+            name: simu-a-init
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            storage: 1Gi

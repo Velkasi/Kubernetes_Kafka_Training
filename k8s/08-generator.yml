@@ -1,0 +1,85 @@
+# Generateur de donnees : insere une ligne toutes les 2 s dans chaque base de simulation,
+# et toutes les 10 iterations MODIFIE une ligne existante de A (pour tester la remontee des mises a jour).
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: generator-script
+  namespace: kafka-lab
+data:
+  generate.sh: |
+    #!/bin/sh
+    i=0
+    echo "Generateur demarre"
+    while true; do
+      i=$((i + 1))
+
+      psql -h simu-a -d simu -q -v ON_ERROR_STOP=1 -c "
+        INSERT INTO mesures (machine, capteur, valeur, unite, mesure_le)
+        SELECT 'EQ-10' || (1 + floor(random() * 5))::int, s.capteur,
+               round((random() * 100)::numeric, 3), s.unite, now()
+        FROM (VALUES ('temperature','C'), ('pression','bar'), ('vibration','mm/s')) AS s(capteur, unite)
+        ORDER BY random() LIMIT 1" || echo "$(date -u +%T) simu-a indisponible"
+
+      psql -h simu-b -d simu -q -v ON_ERROR_STOP=1 -c "
+        INSERT INTO sim_results (equipment_code, sensor_name, measured_value, unit, measured_at)
+        SELECT 200 + floor(random() * 5)::int, s.sensor,
+               (random() * 100)::real, s.unit, now()
+        FROM (VALUES ('temperature','C'), ('pressure','bar'), ('vibration','mm/s')) AS s(sensor, unit)
+        ORDER BY random() LIMIT 1" || echo "$(date -u +%T) simu-b indisponible"
+
+      if [ $((i % 10)) -eq 0 ]; then
+        psql -h simu-a -d simu -q -v ON_ERROR_STOP=1 -c "
+          UPDATE mesures
+             SET valeur = round((random() * 100)::numeric, 3), updated_at = now()
+           WHERE measure_id = (SELECT measure_id FROM mesures ORDER BY random() LIMIT 1)" \
+          && echo "$(date -u +%T) iteration $i : une ligne de simu-a modifiee"
+      fi
+
+      sleep 2
+    done
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: generator
+  namespace: kafka-lab
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: generator
+  template:
+    metadata:
+      labels:
+        app: generator
+    spec:
+      containers:
+        - name: generator
+          image: postgres:16-alpine      # on ne s'en sert que pour le client psql
+          command: ["sh", "/scripts/generate.sh"]
+          env:
+            - name: PGUSER
+              valueFrom:
+                secretKeyRef:
+                  name: pg-credentials
+                  key: POSTGRES_USER
+            - name: PGPASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: pg-credentials
+                  key: POSTGRES_PASSWORD
+            - name: PGCONNECT_TIMEOUT
+              value: "3"
+          resources:
+            requests:
+              cpu: 10m
+              memory: 16Mi
+            limits:
+              memory: 64Mi
+          volumeMounts:
+            - name: script
+              mountPath: /scripts
+      volumes:
+        - name: script
+          configMap:
+            name: generator-script

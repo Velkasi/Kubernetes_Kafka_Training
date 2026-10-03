@@ -1,0 +1,9 @@
+# Le contrat Avro, gere comme une ressource kafkactl (etape 11 du guide).
+# Le fichier .avsc est d'abord genere par la source A, verifie, puis fige ici.
+# Chemin relatif au dossier depuis lequel tu lances kafkactl (kafkactl/).
+apiVersion: v1
+kind: Schema
+metadata:
+  name: lab.simulation.measures-value   # TopicNameStrategy : <topic>-value
+spec:
+  schemaFile: schemas/simulation-measure.avsc

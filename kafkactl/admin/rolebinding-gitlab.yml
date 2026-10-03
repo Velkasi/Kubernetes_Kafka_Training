@@ -1,0 +1,36 @@
+# OPTIONNEL — mode "GitLab reel" (GUIDE.md, annexe B).
+# Donne au namespace "lab" les memes droits a un VRAI groupe gitlab.com dont tu es membre.
+# Remplace MON-GROUPE/simulation par le chemin complet de ton groupe (visible dans l'URL GitLab :
+# https://gitlab.com/MON-GROUPE/simulation  ->  MON-GROUPE/simulation).
+# A appliquer avec le contexte admin :  kafkactl config use-context lab-admin
+apiVersion: v1
+kind: RoleBinding
+metadata:
+  name: lab-rb-gitlab
+  namespace: lab
+spec:
+  role:
+    resourceTypes:
+      - schemas
+      - schemas/config
+      - topics
+      - topics/import
+      - topics/delete-records
+      - connectors
+      - connectors/import
+      - connectors/change-state
+      - connectors/offsets
+      - connect-clusters
+      - connect-clusters/vaults
+      - acls
+      - consumer-groups
+      - consumer-groups/reset
+      - streams
+    verbs:
+      - GET
+      - POST
+      - PUT
+      - DELETE
+  subject:
+    subjectType: GROUP
+    subjectName: MON-GROUPE/simulation

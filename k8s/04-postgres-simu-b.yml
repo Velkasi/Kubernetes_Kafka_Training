@@ -1,0 +1,92 @@
+# Base de simulation B : meme besoin metier que A, mais structuree autrement.
+#   A.machine  VARCHAR  <->  B.equipment_code INTEGER
+#   A.valeur   NUMERIC  <->  B.measured_value REAL
+#   A.updated_at        <->  B.last_update
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: simu-b-init
+  namespace: kafka-lab
+data:
+  01-schema.sql: |
+    CREATE TABLE sim_results (
+      result_id       SERIAL      PRIMARY KEY,
+      equipment_code  INTEGER     NOT NULL,             -- ex : 205 (devient 'EQ-205')
+      sensor_name     VARCHAR(40) NOT NULL,
+      measured_value  REAL        NOT NULL,
+      unit            VARCHAR(10) NOT NULL,
+      measured_at     TIMESTAMP   NOT NULL,
+      last_update     TIMESTAMP   NOT NULL DEFAULT now()
+    );
+    CREATE INDEX sim_results_last_update ON sim_results (last_update, result_id);
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: simu-b
+  namespace: kafka-lab
+spec:
+  selector:
+    app: simu-b
+  ports:
+    - name: postgres
+      port: 5432
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: simu-b
+  namespace: kafka-lab
+spec:
+  serviceName: simu-b
+  replicas: 1
+  selector:
+    matchLabels:
+      app: simu-b
+  template:
+    metadata:
+      labels:
+        app: simu-b
+    spec:
+      containers:
+        - name: postgres
+          image: postgres:16-alpine
+          ports:
+            - containerPort: 5432
+          envFrom:
+            - secretRef:
+                name: pg-credentials
+          env:
+            - name: POSTGRES_DB
+              value: simu
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata
+            - name: TZ
+              value: UTC
+          readinessProbe:
+            exec:
+              command: ["pg_isready", "-U", "lab", "-d", "simu"]
+            periodSeconds: 5
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              memory: 256Mi
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/postgresql/data
+            - name: init
+              mountPath: /docker-entrypoint-initdb.d
+      volumes:
+        - name: init
+          configMap:
+            name: simu-b-init
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            storage: 1Gi

@@ -1,0 +1,32 @@
+# Sink JDBC : topic lab.simulation.measures -> table simulation_measures de la base centrale.
+# Consumer group cree par Connect : connect-lab.sink-central
+apiVersion: v1
+kind: Connector
+metadata:
+  name: lab.sink-central
+spec:
+  connectCluster: connect-lab
+  config:
+    connector.class: io.confluent.connect.jdbc.JdbcSinkConnector
+    tasks.max: '3'                         # = nombre de partitions : une tache par partition
+    topics: lab.simulation.measures
+    connection.url: jdbc:postgresql://central:5432/central
+    connection.user: lab
+    connection.password: lab-password
+    table.name.format: simulation_measures
+    auto.create: 'false'                   # la table est creee par le DBA, pas par le connecteur
+    auto.evolve: 'false'
+
+    # Idempotence : un message relu met a jour la ligne au lieu de la dupliquer.
+    insert.mode: upsert
+    pk.mode: record_value
+    pk.fields: source_id,measure_id
+
+    db.timezone: UTC
+    # Base centrale indisponible : on reessaie 20 x 5 s avant de passer en FAILED.
+    max.retries: '20'
+    retry.backoff.ms: '5000'
+
+    key.converter: org.apache.kafka.connect.storage.StringConverter
+    value.converter: io.confluent.connect.avro.AvroConverter
+    value.converter.schema.registry.url: http://schema-registry:8081

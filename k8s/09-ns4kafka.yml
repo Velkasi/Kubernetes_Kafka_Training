@@ -1,0 +1,133 @@
+# Ns4Kafka : l'API que kafkactl appelle. Elle verifie les droits (RoleBinding / groupe GitLab),
+# le prefixe possede (ACL OWNER) et les validateurs du namespace, puis cree les ressources
+# sur Kafka, Schema Registry et Kafka Connect.
+#
+# AUTHENTIFICATION — comme en prod, kafkactl envoie un "user-token" et Ns4Kafka en deduit
+# une liste de GROUPES GITLAB. Deux modes :
+#
+#  1. Mode labo (par defaut) : GitLab est SIMULE par des utilisateurs locaux.
+#     Chaque token correspond a un "compte GitLab" membre de groupes GitLab fictifs :
+#       token "kafka-admin-token"     -> groupe kafka-lab/kafka-admins  (l'equipe Kafka = admin Ns4Kafka)
+#       token "simulation-dev-token"  -> groupe kafka-lab/simulation    (TON equipe projet)
+#     Ns4Kafka stocke le SHA-256 du token :  printf '%s' 'mon-token' | sha256sum
+#
+#  2. Mode GitLab reel : passe MICRONAUT_SECURITY_GITLAB_ENABLED a "true" (plus bas).
+#     Ton Personal Access Token gitlab.com (scope read_api) devient ton user-token kafkactl,
+#     et tes vrais groupes gitlab.com sont utilises. Voir GUIDE.md, annexe "GitLab reel".
+#     Les utilisateurs locaux restent actifs (pratique pour garder le compte admin).
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ns4kafka-config
+  namespace: kafka-lab
+data:
+  application.yml: |
+    kafka:
+      bootstrap.servers: "kafka:9092"
+
+    micronaut:
+      security:
+        gitlab:
+          url: "https://gitlab.com"
+        token:
+          jwt:
+            signatures:
+              secret:
+                generator:
+                  secret: "kafka-lab-jwt-secret-change-me-0123456789"
+
+    ns4kafka:
+      security:
+        # Groupe GitLab dont les membres sont administrateurs Ns4Kafka (l'equipe Kafka en prod).
+        admin-group: "kafka-lab/kafka-admins"
+        # Cle de chiffrement de "kafkactl connect-cluster vault" (32 caracteres).
+        aes256-encryption-key: "kafkalabkafkalabkafkalabkafkalab"
+        local-users:
+          # kafkactl s'authentifie toujours avec l'identifiant "gitlab" + son user-token.
+          - username: "gitlab"
+            password: "f92614a8ea3da10fe1c3cbea3e08784e3c46f6963d6a5179f25828ed3079a8ee"  # sha256("kafka-admin-token")
+            groups:
+              - "kafka-lab/kafka-admins"
+          - username: "gitlab"
+            password: "ff3062d21dfd889ba0e2f05ad363c064f59978a61073725b0cd1115e43cc8694"  # sha256("simulation-dev-token")
+            groups:
+              - "kafka-lab/simulation"
+
+      managed-clusters:
+        # Nom du cluster Kafka cote Ns4Kafka (metadata.cluster des namespaces).
+        local:
+          provider: "SELF_MANAGED"
+          manage-topics: true
+          manage-connectors: true
+          # Broker sans authentification ni autorisation : pas d'ACL Kafka ni d'utilisateurs a gerer.
+          # En prod (SASL), l'equipe Kafka active ces options.
+          manage-acls: false
+          manage-users: false
+          drop-unsync-acls: false
+          config:
+            bootstrap.servers: "kafka:9092"
+          schema-registry:
+            url: "http://schema-registry:8081"
+          connects:
+            connect-lab:
+              url: "http://connect:8083"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: ns4kafka
+  namespace: kafka-lab
+spec:
+  selector:
+    app: ns4kafka
+  ports:
+    - name: http
+      port: 8080
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ns4kafka
+  namespace: kafka-lab
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: ns4kafka
+  template:
+    metadata:
+      labels:
+        app: ns4kafka
+    spec:
+      enableServiceLinks: false
+      containers:
+        - name: ns4kafka
+          image: michelin/ns4kafka:1.22.5
+          ports:
+            - containerPort: 8080
+          env:
+            - name: MICRONAUT_CONFIG_FILES
+              value: /home/app/config/application.yml
+            # "false" = GitLab simule par les utilisateurs locaux ; "true" = vrais groupes gitlab.com.
+            - name: MICRONAUT_SECURITY_GITLAB_ENABLED
+              value: "false"
+            - name: JAVA_TOOL_OPTIONS
+              value: "-XX:MaxRAMPercentage=70"
+          readinessProbe:
+            tcpSocket:
+              port: 8080
+            initialDelaySeconds: 20
+            periodSeconds: 5
+          resources:
+            requests:
+              cpu: 100m
+              memory: 512Mi
+            limits:
+              memory: 768Mi
+          volumeMounts:
+            - name: config
+              mountPath: /home/app/config
+      volumes:
+        - name: config
+          configMap:
+            name: ns4kafka-config

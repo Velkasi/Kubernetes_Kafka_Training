@@ -1,0 +1,77 @@
+# AKHQ : interface web pour voir les topics, messages Avro decodes, consumer groups et connecteurs.
+# Acces : kubectl port-forward svc/akhq 8090:8080  puis http://localhost:8090
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: akhq-config
+  namespace: kafka-lab
+data:
+  application.yml: |
+    akhq:
+      connections:
+        kafka-lab:
+          properties:
+            bootstrap.servers: "kafka:9092"
+          schema-registry:
+            url: "http://schema-registry:8081"
+          connect:
+            - name: "connect-lab"
+              url: "http://connect:8083"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: akhq
+  namespace: kafka-lab
+spec:
+  selector:
+    app: akhq
+  ports:
+    - name: http
+      port: 8080
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: akhq
+  namespace: kafka-lab
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: akhq
+  template:
+    metadata:
+      labels:
+        app: akhq
+    spec:
+      enableServiceLinks: false
+      containers:
+        - name: akhq
+          image: tchiotludo/akhq:0.26.0
+          ports:
+            - containerPort: 8080
+          env:
+            - name: MICRONAUT_CONFIG_FILES
+              value: /app/config/application.yml
+            - name: JAVA_OPTS
+              value: "-Xmx320m"
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 28081
+            initialDelaySeconds: 20
+            periodSeconds: 5
+          resources:
+            requests:
+              cpu: 50m
+              memory: 384Mi
+            limits:
+              memory: 512Mi
+          volumeMounts:
+            - name: config
+              mountPath: /app/config
+      volumes:
+        - name: config
+          configMap:
+            name: akhq-config

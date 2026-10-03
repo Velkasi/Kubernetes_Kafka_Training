@@ -1,0 +1,91 @@
+# Base centrale : UNE seule structure, quelle que soit la source.
+# La cle primaire (source_id, measure_id) permet l'upsert du sink => pas de doublon.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: central-init
+  namespace: kafka-lab
+data:
+  01-schema.sql: |
+    CREATE TABLE simulation_measures (
+      source_id    VARCHAR(20)      NOT NULL,
+      measure_id   BIGINT           NOT NULL,
+      equipment    VARCHAR(50),
+      sensor       VARCHAR(50),
+      value        DOUBLE PRECISION,
+      unit         VARCHAR(20),
+      measured_at  TIMESTAMP,
+      updated_at   TIMESTAMP,
+      PRIMARY KEY (source_id, measure_id)
+    );
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: central
+  namespace: kafka-lab
+spec:
+  selector:
+    app: central
+  ports:
+    - name: postgres
+      port: 5432
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: central
+  namespace: kafka-lab
+spec:
+  serviceName: central
+  replicas: 1
+  selector:
+    matchLabels:
+      app: central
+  template:
+    metadata:
+      labels:
+        app: central
+    spec:
+      containers:
+        - name: postgres
+          image: postgres:16-alpine
+          ports:
+            - containerPort: 5432
+          envFrom:
+            - secretRef:
+                name: pg-credentials
+          env:
+            - name: POSTGRES_DB
+              value: central
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata
+            - name: TZ
+              value: UTC
+          readinessProbe:
+            exec:
+              command: ["pg_isready", "-U", "lab", "-d", "central"]
+            periodSeconds: 5
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              memory: 256Mi
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/postgresql/data
+            - name: init
+              mountPath: /docker-entrypoint-initdb.d
+      volumes:
+        - name: init
+          configMap:
+            name: central-init
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            storage: 1Gi
